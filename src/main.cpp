@@ -9,6 +9,7 @@
 #include "hardware/display.h"
 #include "services/adsb_client.h"
 #include "services/radar_location.h"
+#include "services/route_lookup.h"
 #include "services/wifi_setup.h"
 #include "ui/radar_display.h"
 #include "ui/radar_range.h"
@@ -20,6 +21,7 @@ bool g_radar_visible = false;
 unsigned long g_wifi_down_since = 0;
 unsigned long g_last_reconnect_ms = 0;
 unsigned long g_last_redraw_ms = 0;
+unsigned long g_last_adsb_fetch_ms = 0;
 
 void showRadarIfConnected() {
   if (WiFi.status() != WL_CONNECTED) {
@@ -49,18 +51,25 @@ void handleBootButton() {
   }
 }
 
-// ADS-B fetch runs on its own task: the HTTPS request blocks for ~1-2 s, and
-// keeping it off the main loop lets the radar keep redrawing (dead-reckoned) at
-// 4 Hz throughout. The task publishes into the shared aircraft buffer under a
-// lock; the render loop reads a snapshot.
-void adsbFetchTask(void*) {
+// Network work runs on its own task: the ADS-B HTTPS fetch blocks for ~1-2 s
+// and route lookups (adsbdb.com) block too, so keeping them off the main loop
+// lets the radar keep redrawing (dead-reckoned) at 4 Hz throughout. The ADS-B
+// fetch publishes into the shared aircraft buffer under its lock; route results
+// are committed under services::data::lock(). Route lookups read the aircraft
+// list directly, which is safe because they run on this same task.
+void netTaskFn(void*) {
   for (;;) {
     if (WiFi.status() == WL_CONNECTED) {
-      services::adsb::fetchUpdate(services::location::lat(),
-                                  services::location::lon(),
-                                  ui::radar::fetchRadiusKm());
+      services::route::poll();
+      if (g_last_adsb_fetch_ms == 0 ||
+          millis() - g_last_adsb_fetch_ms >= config::kAdsbFetchIntervalMs) {
+        g_last_adsb_fetch_ms = millis();
+        services::adsb::fetchUpdate(services::location::lat(),
+                                    services::location::lon(),
+                                    ui::radar::fetchRadiusKm());
+      }
     }
-    vTaskDelay(pdMS_TO_TICKS(config::kAdsbFetchIntervalMs));
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
 
@@ -74,9 +83,6 @@ void setup() {
 
   bootButtonInit();
   displayInit();
-  // Grab the frame sprite's heap block now, while the heap is still pristine
-  // — WiFiManager/WiFi/TLS below fragment it, which can starve this single
-  // large contiguous allocation if it's deferred until the first draw.
   if (!ui::radarDisplayPreallocate()) {
     Serial.println("radar: preallocate failed, will retry on first draw");
   }
@@ -91,9 +97,9 @@ void setup() {
     showRadarIfConnected();
   }
 
-  // Start the background ADS-B fetch (pinned to core 0, away from the render
+  // Start the background network task (pinned to core 0, away from the render
   // loop on core 1). It checks Wi-Fi state each cycle.
-  xTaskCreatePinnedToCore(adsbFetchTask, "adsb", 16384, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(netTaskFn, "net", 16384, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
@@ -124,8 +130,8 @@ void loop() {
     if (!g_radar_visible) {
       showRadarIfConnected();
     } else if (millis() - g_last_redraw_ms >= config::kRadarRedrawIntervalMs) {
-      // Redraw at 4 Hz with dead-reckoned positions; the ADS-B fetch runs on
-      // its own task (adsbFetchTask).
+      // Redraw at 4 Hz with dead-reckoned positions; network I/O runs on its
+      // own task (netTaskFn).
       g_last_redraw_ms = millis();
       ui::radarDisplayRefreshAircraft();
     }

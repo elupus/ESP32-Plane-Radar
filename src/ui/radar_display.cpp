@@ -11,7 +11,9 @@
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "services/adsb_client.h"
+#include "services/data_lock.h"
 #include "services/radar_location.h"
+#include "services/route_lookup.h"
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
@@ -27,6 +29,7 @@ uint16_t kColorAircraft = 0x001F;
 uint16_t kColorTrackVector = 0xFFFF;
 uint16_t kColorTagType = 0x5DFF;
 uint16_t kColorTagAltitude = 0xFFE0;
+uint16_t kColorTagRoute = 0xA534;
 uint16_t kColorRunway = 0x4D5F;
 uint16_t kColorRunwayLabel = 0x7DFF;
 
@@ -192,6 +195,8 @@ void initPalette() {
       tft.color565(radar::kTagTypeR, radar::kTagTypeG, radar::kTagTypeB);
   radar::kColorTagAltitude =
       tft.color565(radar::kTagAltR, radar::kTagAltG, radar::kTagAltB);
+  radar::kColorTagRoute =
+      tft.color565(radar::kTagRouteR, radar::kTagRouteG, radar::kTagRouteB);
   radar::kColorRunway =
       tft.color565(radar::kRunwayR, radar::kRunwayG, radar::kRunwayB);
   radar::kColorRunwayLabel = tft.color565(radar::kRunwayLabelR, radar::kRunwayLabelG,
@@ -407,7 +412,8 @@ void applyTagStyle() {
   }
 }
 
-int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
+int measureTagBlockWidth(const services::adsb::Aircraft& plane,
+                         const char* route) {
   applyTagStyle();
   int max_w = 0;
   if (plane.callsign[0] != '\0') {
@@ -428,6 +434,12 @@ int measureTagBlockWidth(const services::adsb::Aircraft& plane) {
       max_w = w;
     }
   }
+  if (route != nullptr) {
+    const int w = s_draw->textWidth(route);
+    if (w > max_w) {
+      max_w = w;
+    }
+  }
   return max_w;
 }
 
@@ -435,9 +447,12 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   initTagLabelMetrics();
   applyTagStyle();
 
+  const char* route = services::route::routeFor(plane.callsign);
+
   const int line_h = s_draw->fontHeight();
-  const int block_w = measureTagBlockWidth(plane);
-  const int block_h = line_h * 3;
+  const int block_w = measureTagBlockWidth(plane, route);
+  const int line_count = route != nullptr ? 4 : 3;
+  const int block_h = line_h * line_count;
   int ly = y - block_h / 2;
 
   const int symbol_half =
@@ -471,6 +486,12 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   if (plane.alt[0] != '\0') {
     s_draw->setTextColor(radar::kColorTagAltitude, radar::kColorBackground);
     s_draw->drawString(plane.alt, anchor_x, ly);
+  }
+  ly += line_h;
+
+  if (route != nullptr) {
+    s_draw->setTextColor(radar::kColorTagRoute, radar::kColorBackground);
+    s_draw->drawString(route, anchor_x, ly);
   }
 }
 
@@ -519,6 +540,10 @@ void drawAircraft() {
   unsigned long base_ms = 0;
   const size_t n = services::adsb::snapshotAircraft(
       planes, services::adsb::kMaxAircraft, &base_ms);
+
+  // Held for the rest of the pass: route lookups commit under the same lock,
+  // and tags must not read a route string while it's being rewritten.
+  services::data::lock();
 
   AircraftDrawItem items[services::adsb::kMaxAircraft];
   BeyondDotDrawItem dots[services::adsb::kMaxAircraft];
@@ -577,6 +602,8 @@ void drawAircraft() {
     const size_t i = items[d].index;
     drawAircraftTag(items[d].x, items[d].y, planes[i]);
   }
+
+  services::data::unlock();
 }
 
 void applyCardinalStyle() {
