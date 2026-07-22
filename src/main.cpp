@@ -74,6 +74,12 @@ void setup() {
 
   bootButtonInit();
   displayInit();
+  // Grab the frame sprite's heap block now, while the heap is still pristine
+  // — WiFiManager/WiFi/TLS below fragment it, which can starve this single
+  // large contiguous allocation if it's deferred until the first draw.
+  if (!ui::radarDisplayPreallocate()) {
+    Serial.println("radar: preallocate failed, will retry on first draw");
+  }
   if (wifiShowsSetupScreenOnBoot()) {
     statusScreenPortal();
   }

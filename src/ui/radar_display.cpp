@@ -720,6 +720,8 @@ void renderFrame() {
 
 }  // namespace
 
+bool radarDisplayPreallocate() { return ensureFrameSprite(); }
+
 void radarDisplayDraw() {
   initPalette();
   initLabelMetrics();

@@ -2,6 +2,9 @@
 
 namespace ui {
 
+/** Allocate the off-screen frame sprite now. */
+bool radarDisplayPreallocate();
+
 /** Draw the static sonar/radar grid (black disc, green overlay, labels). */
 void radarDisplayDraw();
 
