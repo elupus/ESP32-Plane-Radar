@@ -85,6 +85,11 @@ char s_runways_checkbox_attrs[32] = "type=\"checkbox\"";
 WiFiManagerParameter s_param_runways("show_runways", "Show airport runways", "T", 2,
                                      s_runways_checkbox_attrs, WFM_LABEL_AFTER);
 
+char s_route_replace_checkbox_attrs[32] = "type=\"checkbox\"";
+WiFiManagerParameter s_param_route_replace(
+    "route_replace", "Show destination instead of flight number", "T", 2,
+    s_route_replace_checkbox_attrs, WFM_LABEL_AFTER);
+
 void refreshPortalParamValues() {
   char lat_buf[kCoordParamLen + 1];
   char lon_buf[kCoordParamLen + 1];
@@ -98,6 +103,9 @@ void refreshPortalParamValues() {
   snprintf(s_runways_checkbox_attrs, sizeof(s_runways_checkbox_attrs),
            "type=\"checkbox\"%s", ui::radar::showRunways() ? " checked" : "");
   s_param_runways.setValue("T", 2);
+  snprintf(s_route_replace_checkbox_attrs, sizeof(s_route_replace_checkbox_attrs),
+           "type=\"checkbox\"%s", ui::radar::routeReplacesCallsign() ? " checked" : "");
+  s_param_route_replace.setValue("T", 2);
 }
 
 void onPortalParamsSaved() {
@@ -107,6 +115,7 @@ void onPortalParamsSaved() {
   }
   ui::radar::saveMilesFromPortal(s_param_miles.getValue());
   ui::radar::saveRunwaysFromPortal(s_param_runways.getValue());
+  ui::radar::saveRouteReplacesCallsignFromPortal(s_param_route_replace.getValue());
 
   refreshPortalParamValues();
 }
@@ -117,6 +126,7 @@ void attachPortalParams(WiFiManager& wm) {
   wm.addParameter(&s_param_lon);
   wm.addParameter(&s_param_miles);
   wm.addParameter(&s_param_runways);
+  wm.addParameter(&s_param_route_replace);
   wm.setSaveParamsCallback(onPortalParamsSaved);
 }
 

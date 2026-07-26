@@ -448,10 +448,13 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   applyTagStyle();
 
   const char* route = services::route::routeFor(plane.callsign);
+  const bool route_replaces_callsign =
+      route != nullptr && ui::radar::routeReplacesCallsign();
+  const char* route_line = route_replaces_callsign ? nullptr : route;
 
   const int line_h = s_draw->fontHeight();
   const int block_w = measureTagBlockWidth(plane, route);
-  const int line_count = route != nullptr ? 4 : 3;
+  const int line_count = route_line != nullptr ? 4 : 3;
   const int block_h = line_h * line_count;
   int ly = y - block_h / 2;
 
@@ -471,7 +474,10 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   }
   ly = std::max(1, std::min(ly, radar::kSize - block_h - 1));
 
-  if (plane.callsign[0] != '\0') {
+  if (route_replaces_callsign) {
+    s_draw->setTextColor(radar::kColorTagRoute, radar::kColorBackground);
+    s_draw->drawString(route, anchor_x, ly);
+  } else if (plane.callsign[0] != '\0') {
     s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
     s_draw->drawString(plane.callsign, anchor_x, ly);
   }
@@ -489,9 +495,9 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   }
   ly += line_h;
 
-  if (route != nullptr) {
+  if (route_line != nullptr) {
     s_draw->setTextColor(radar::kColorTagRoute, radar::kColorBackground);
-    s_draw->drawString(route, anchor_x, ly);
+    s_draw->drawString(route_line, anchor_x, ly);
   }
 }
 
