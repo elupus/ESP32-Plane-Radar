@@ -54,6 +54,12 @@ constexpr unsigned long kAdsbFetchIntervalMs = 5000;
  *  is smooth. ~4 Hz = 250 ms (panel scanout caps at ~24 Hz; the full-frame
  *  recompose+present is the practical limit ~10-15 Hz). */
 constexpr unsigned long kRadarRedrawIntervalMs = 250;
+/** Stop dead-reckoning a position older than this (e.g. fetches failing). */
+constexpr float kAircraftExtrapolateMaxSec = 30.0f;
+/** Glide from the drawn position onto each new report over this long. */
+constexpr unsigned long kAircraftBlendMs = kAdsbFetchIntervalMs;
+/** Gaps larger than this snap instead of gliding. */
+constexpr float kAircraftBlendMaxKm = 5.0f;
 /** Legacy scale unused — fetch uses radar::fetchRadiusKm() to screen edge. */
 constexpr float kAdsbFetchRadiusScale = 1.0f;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */

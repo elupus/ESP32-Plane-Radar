@@ -8,6 +8,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include "config.h"
@@ -19,6 +21,8 @@ namespace {
 
 constexpr char kApiBase[] = "https://opendata.adsb.fi/api/v3/lat/";
 constexpr float kKmPerNm = 1.852f;
+constexpr float kKmPerDeg = 111.0f;
+constexpr float kDegToRad = 0.01745329252f;
 constexpr int kConnectTimeoutMs = 5000;  // TLS handshake needs room
 constexpr unsigned long kRequestTimeoutMs = 6000;
 
@@ -28,16 +32,84 @@ unsigned long s_last_update_ms = 0;
 PollFn s_poll_fn = nullptr;
 SemaphoreHandle_t s_mutex = nullptr;
 
+void deadReckon(const Aircraft& plane, unsigned long base_ms,
+                unsigned long now_ms, float* lat, float* lon) {
+  *lat = plane.lat;
+  *lon = plane.lon;
+  if (base_ms == 0 || plane.gs_knots <= 0.0f) {
+    return;
+  }
+  // Elapsed since the fix was measured = time since fetch + the fix's own age.
+  const float elapsed_s =
+      std::min(static_cast<float>((now_ms - base_ms) + plane.pos_age_ms) / 1000.0f,
+               config::kAircraftExtrapolateMaxSec);
+  const float dist_km = plane.gs_knots * kKmPerNm * elapsed_s / 3600.0f;
+  if (dist_km <= 0.0f) {
+    return;
+  }
+  // Proper cos(lat) longitude step, matching the cos(lat) projection, so the
+  // prediction lands where the next fetched position will be drawn.
+  const float rad = plane.track_deg * kDegToRad;  // track: 0 = N, 90 = E
+  const float cos_lat = std::max(0.01f, cosf(plane.lat * kDegToRad));
+  *lat += dist_km * cosf(rad) / kKmPerDeg;
+  *lon += dist_km * sinf(rad) / (kKmPerDeg * cos_lat);
+}
+
+const Aircraft* findPublished(const char* hex) {
+  if (hex[0] == '\0') {
+    return nullptr;
+  }
+  for (size_t i = 0; i < s_aircraft_count; ++i) {
+    if (strcmp(s_aircraft[i].hex, hex) == 0) {
+      return &s_aircraft[i];
+    }
+  }
+  return nullptr;
+}
+
+// Seeds the blend offset so a plane continues from exactly where it is drawn
+// right now. Large gaps (position glitch, range change) snap instead.
+void startBlend(Aircraft* ac, unsigned long now_ms) {
+  ac->blend_dlat = 0.0f;
+  ac->blend_dlon = 0.0f;
+  const Aircraft* prev = findPublished(ac->hex);
+  if (prev == nullptr) {
+    return;
+  }
+  float shown_lat = 0.0f;
+  float shown_lon = 0.0f;
+  displayLatLon(*prev, s_last_update_ms, now_ms, &shown_lat, &shown_lon);
+  float pred_lat = 0.0f;
+  float pred_lon = 0.0f;
+  deadReckon(*ac, now_ms, now_ms, &pred_lat, &pred_lon);
+
+  const float dlat = shown_lat - pred_lat;
+  const float dlon = shown_lon - pred_lon;
+  const float dy_km = dlat * kKmPerDeg;
+  const float dx_km = dlon * kKmPerDeg * cosf(pred_lat * kDegToRad);
+  if (dx_km * dx_km + dy_km * dy_km >
+      config::kAircraftBlendMaxKm * config::kAircraftBlendMaxKm) {
+    return;
+  }
+  ac->blend_dlat = dlat;
+  ac->blend_dlon = dlon;
+}
+
 /** Publish parsed aircraft to the shared buffer atomically. */
-void publish(const Aircraft* src, size_t count) {
+void publish(Aircraft* src, size_t count) {
   if (s_mutex != nullptr) {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
+  }
+  // Blend against the still-published previous list before replacing it.
+  const unsigned long now_ms = millis();
+  for (size_t i = 0; i < count; ++i) {
+    startBlend(&src[i], now_ms);
   }
   for (size_t i = 0; i < count; ++i) {
     s_aircraft[i] = src[i];
   }
   s_aircraft_count = count;
-  s_last_update_ms = millis();  // base time for dead-reckoning
+  s_last_update_ms = now_ms;  // base time for dead-reckoning
   if (s_mutex != nullptr) {
     xSemaphoreGive(s_mutex);
   }
@@ -257,6 +329,19 @@ const Aircraft* aircraftList() { return s_aircraft; }
 
 unsigned long lastUpdateMs() { return s_last_update_ms; }
 
+void displayLatLon(const Aircraft& plane, unsigned long base_ms,
+                   unsigned long now_ms, float* lat, float* lon) {
+  deadReckon(plane, base_ms, now_ms, lat, lon);
+  const unsigned long elapsed = now_ms - base_ms;
+  if (base_ms == 0 || elapsed >= config::kAircraftBlendMs) {
+    return;
+  }
+  const float remain =
+      1.0f - static_cast<float>(elapsed) / static_cast<float>(config::kAircraftBlendMs);
+  *lat += plane.blend_dlat * remain;
+  *lon += plane.blend_dlon * remain;
+}
+
 size_t snapshotAircraft(Aircraft* out, size_t max_out,
                         unsigned long* out_last_update_ms) {
   if (s_mutex != nullptr) {
@@ -386,6 +471,7 @@ bool fetchUpdate(double center_lat, double center_lon, float fetch_radius_km) {
       parsed[n].pos_age_ms = static_cast<uint32_t>(seen_pos * 1000.0f);
 
       fillTagFields(&parsed[n], plane);
+      copyJsonStringTrimmed(plane, "hex", parsed[n].hex, sizeof(parsed[n].hex));
       ++n;
     }
   }

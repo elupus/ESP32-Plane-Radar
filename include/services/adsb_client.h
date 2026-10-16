@@ -15,6 +15,14 @@ struct Aircraft {
    *  Added to the elapsed time when dead-reckoning so the drawn position
    *  reflects the estimated current location, not the already-stale fix. */
   uint32_t pos_age_ms;
+  /**
+   * Offset (deg) from the dead-reckoned position to where the plane was drawn
+   * when this data was published; fades to zero over kAircraftBlendMs so the
+   * symbol glides onto the new track instead of jumping.
+   */
+  float blend_dlat;
+  float blend_dlon;
+  char hex[7];
   char callsign[9];
   char type[5];
   char alt[12];
@@ -42,6 +50,14 @@ const Aircraft* aircraftList();
  * newer positions from track_deg/gs_knots and the elapsed time.
  */
 unsigned long lastUpdateMs();
+
+/**
+ * Position to draw at now_ms: dead-reckoned along track at ground speed from
+ * the fix (published at base_ms, already pos_age_ms old), plus the fading
+ * blend offset. base_ms is the timestamp snapshotAircraft() reported.
+ */
+void displayLatLon(const Aircraft& plane, unsigned long base_ms,
+                   unsigned long now_ms, float* lat, float* lon);
 
 /** Hook invoked during long HTTP I/O (e.g. wifiLoop). Optional. */
 using PollFn = void (*)();
