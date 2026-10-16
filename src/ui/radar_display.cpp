@@ -17,6 +17,7 @@
 #include "ui/radar_range.h"
 #include "ui/radar_theme.h"
 #include "ui/runway_overlay.h"
+#include "ui/terrain_overlay.h"
 
 namespace ui {
 namespace radar {
@@ -32,6 +33,11 @@ uint16_t kColorTagAltitude = 0xFFE0;
 uint16_t kColorTagRoute = 0xA534;
 uint16_t kColorRunway = 0x4D5F;
 uint16_t kColorRunwayLabel = 0x7DFF;
+uint16_t kColorTerrainCoast = 0x3B92;
+uint16_t kColorTerrainLake = 0x2A91;
+uint16_t kColorTerrainRiver = 0x118D;
+uint16_t kColorTerrainBorder = 0x8230;
+uint16_t kColorTerrainWater = 0x000B;
 
 }  // namespace radar
 
@@ -195,6 +201,16 @@ void initPalette() {
       tft.color565(radar::kRunwayR, radar::kRunwayG, radar::kRunwayB);
   radar::kColorRunwayLabel = tft.color565(radar::kRunwayLabelR, radar::kRunwayLabelG,
                                           radar::kRunwayLabelB);
+  radar::kColorTerrainCoast =
+      tft.color565(radar::kTerrainCoastR, radar::kTerrainCoastG, radar::kTerrainCoastB);
+  radar::kColorTerrainLake =
+      tft.color565(radar::kTerrainLakeR, radar::kTerrainLakeG, radar::kTerrainLakeB);
+  radar::kColorTerrainRiver =
+      tft.color565(radar::kTerrainRiverR, radar::kTerrainRiverG, radar::kTerrainRiverB);
+  radar::kColorTerrainBorder = tft.color565(radar::kTerrainBorderR, radar::kTerrainBorderG,
+                                            radar::kTerrainBorderB);
+  radar::kColorTerrainWater =
+      tft.color565(radar::kTerrainWaterR, radar::kTerrainWaterG, radar::kTerrainWaterB);
 }
 
 constexpr float kKmPerDeg = 111.0f;
@@ -685,10 +701,11 @@ void drawStaticGrid(Gfx& gfx) {
   const int cy = radar::kCenterY;
   const int grid_r = radar::kGridOuterRadius;
 
+  initPalette();
   gfx.fillScreen(radar::kColorBackground);
+  terrain::drawTerrainOutlines(gfx);
   drawRings(cx, cy, grid_r);
   drawCrosshairs(cx, cy, grid_r, radar::kColorGrid);
-  initPalette();
   runway::drawLargeAirportRunways(gfx);
   drawCenterDot(cx, cy);
   drawCardinalLabels();

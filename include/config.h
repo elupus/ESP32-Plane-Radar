@@ -65,6 +65,8 @@ constexpr float kAircraftBlendMaxKm = 5.0f;
 constexpr float kAdsbFetchRadiusScale = 1.0f;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
+/** Draw terrain: water fill + coast/lake/river/border outlines (Sweden only). */
+constexpr bool kShowTerrainOutlines = true;
 
 // --- UI colors (RGB565) — status screens ---
 constexpr uint16_t kColorBlack = 0x0000;

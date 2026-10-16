@@ -91,6 +91,26 @@ constexpr uint8_t kRunwayB = 170;
 constexpr uint8_t kRunwayLabelR = 110;
 constexpr uint8_t kRunwayLabelG = 210;
 constexpr uint8_t kRunwayLabelB = 230;
+/**
+ * Terrain: grey outlines over a dark-blue water fill (land stays background).
+ * The frame sprite is RGB332, so R/G step by ~36 and B by 85: these are
+ * picked to land on the nearest-to-grey levels it can show.
+ */
+constexpr uint8_t kTerrainCoastR = 110;
+constexpr uint8_t kTerrainCoastG = 110;
+constexpr uint8_t kTerrainCoastB = 110;
+constexpr uint8_t kTerrainLakeR = 110;
+constexpr uint8_t kTerrainLakeG = 110;
+constexpr uint8_t kTerrainLakeB = 110;
+constexpr uint8_t kTerrainRiverR = 80;
+constexpr uint8_t kTerrainRiverG = 80;
+constexpr uint8_t kTerrainRiverB = 80;
+constexpr uint8_t kTerrainBorderR = 150;
+constexpr uint8_t kTerrainBorderG = 150;
+constexpr uint8_t kTerrainBorderB = 150;
+constexpr uint8_t kTerrainWaterR = 0;
+constexpr uint8_t kTerrainWaterG = 0;
+constexpr uint8_t kTerrainWaterB = 90;
 
 extern uint16_t kColorBackground;
 extern uint16_t kColorGrid;
@@ -103,5 +123,10 @@ extern uint16_t kColorTagAltitude;
 extern uint16_t kColorTagRoute;
 extern uint16_t kColorRunway;
 extern uint16_t kColorRunwayLabel;
+extern uint16_t kColorTerrainCoast;
+extern uint16_t kColorTerrainLake;
+extern uint16_t kColorTerrainRiver;
+extern uint16_t kColorTerrainBorder;
+extern uint16_t kColorTerrainWater;
 
 }  // namespace ui::radar
