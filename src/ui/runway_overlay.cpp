@@ -253,7 +253,7 @@ void drawLargeAirportRunways(lgfx::LGFXBase& gfx) {
     return;
   }
   displayFontEnsureLoaded(gfx);
-  const float radius_km = radar::fetchRadiusKm();
+  const float radius_km = radar::screenRadiusKm();
 
   uint16_t label_airports[kMaxAirportLabels];
   size_t label_count = 0;

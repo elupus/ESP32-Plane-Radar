@@ -42,7 +42,12 @@ void rangeInit();
 void rangeNext();
 const RangePreset& rangeCurrent();
 uint8_t rangeIndex();
-/** ADSB fetch radius (km): scaled to screen edge so beyond-ring dots have data. */
+/** Distance (km) from center to the screen edge at the current range. */
+float screenRadiusKm();
+/**
+ * ADSB fetch radius (km): past the screen edge by kAdsbFetchRadiusScale so
+ * approaching traffic shows as rim dots before it slides on screen.
+ */
 float fetchRadiusKm();
 
 bool useMiles();

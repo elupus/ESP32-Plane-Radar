@@ -229,14 +229,7 @@ void offsetKmFromCenter(float lat, float lon, float* dx_km, float* dy_km,
   *dist_km = sqrtf((*dx_km) * (*dx_km) + (*dy_km) * (*dy_km));
 }
 
-float innerRingMaxKm() {
-  const float outer_km = radar::rangeCurrent().outer_km;
-  return outer_km * (static_cast<float>(radar::kGridOuterRadius -
-                                       radar::kAircraftInsideRingInsetPx) /
-                     static_cast<float>(radar::kGridOuterRadius));
-}
-
-/** Flat lat/lon as x/y: 1° ≈ 111 km, north = screen up. */
+/** Equirectangular around the radar center: north = screen up, km true in both axes. */
 void latLonToScreen(float lat, float lon, int* out_x, int* out_y) {
   const float outer_km = radar::rangeCurrent().outer_km;
   const float px_per_km = static_cast<float>(radar::kGridOuterRadius) / outer_km;
@@ -250,29 +243,38 @@ void latLonToScreen(float lat, float lon, int* out_x, int* out_y) {
   *out_y = radar::kCenterY - static_cast<int>(lroundf(dy_km * px_per_km));
 }
 
-bool isInsideOuterRingKm(float dist_km) { return dist_km <= innerRingMaxKm(); }
-
 int distSqFromCenter(int x, int y) {
   const int dx = x - radar::kCenterX;
   const int dy = y - radar::kCenterY;
   return dx * dx + dy * dy;
 }
 
-bool isInsideOuterRing(int x, int y) {
-  const int max_r = radar::kGridOuterRadius - radar::kAircraftInsideRingInsetPx;
+/** Half the symbol's extent: centroid to nose tip / wing tip. */
+constexpr int kAircraftSymbolHalfPx =
+    radar::kAircraftNoseLenPx + radar::kAircraftTailHalfPx;
+
+/**
+ * True while any part of the symbol can be on the round screen; the panel
+ * edge clips it, so planes slide on and off instead of popping.
+ */
+bool isSymbolOnScreen(int x, int y) {
+  const int max_r = radar::kCenterX + kAircraftSymbolHalfPx;
   return distSqFromCenter(x, y) <= max_r * max_r;
 }
 
-/** Rim dot from true bearing; always on screen edge (even if target is 50+ km away). */
+/** Tags only inside the grid, so they don't pile up on the cardinal labels. */
+bool showsTag(int x, int y) {
+  const int max_r = radar::kGridOuterRadius;
+  return distSqFromCenter(x, y) <= max_r * max_r;
+}
+
+/** Rim dot on the screen edge along the plane's true bearing. */
 bool beyondRingEdgeDotFromLatLon(float lat, float lon, int* out_x, int* out_y) {
   float dx_km = 0.0f;
   float dy_km = 0.0f;
   float dist_km = 0.0f;
   offsetKmFromCenter(lat, lon, &dx_km, &dy_km, &dist_km);
   if (dist_km < 0.01f) {
-    return false;
-  }
-  if (isInsideOuterRingKm(dist_km)) {
     return false;
   }
 
@@ -291,8 +293,8 @@ void drawBeyondRingDot(int x, int y) {
                            radar::kColorAircraft);
 }
 
-void clipPointToOuterRing(int x0, int y0, int* x1, int* y1) {
-  const int max_r = radar::kGridOuterRadius;
+void clipPointToScreen(int x0, int y0, int* x1, int* y1) {
+  const int max_r = radar::kCenterX;
   const int max_r_sq = max_r * max_r;
   if (distSqFromCenter(*x1, *y1) <= max_r_sq) {
     return;
@@ -381,7 +383,7 @@ void drawSpeedVector(int cx, int cy, float heading_deg, float track_deg,
   const float rad = track_deg * kDegToRad;
   int ex = tip_x + static_cast<int>(lroundf(sinf(rad) * len));
   int ey = tip_y - static_cast<int>(lroundf(cosf(rad) * len));
-  clipPointToOuterRing(tip_x, tip_y, &ex, &ey);
+  clipPointToScreen(tip_x, tip_y, &ex, &ey);
   if (ex == tip_x && ey == tip_y) {
     return;
   }
@@ -549,15 +551,10 @@ void drawAircraft() {
     float lon = 0.0f;
     services::adsb::displayLatLon(planes[i], base_ms, now_ms, &lat, &lon);
 
-    float dx_km = 0.0f;
-    float dy_km = 0.0f;
-    float dist_km = 0.0f;
-    offsetKmFromCenter(lat, lon, &dx_km, &dy_km, &dist_km);
-
-    if (isInsideOuterRingKm(dist_km)) {
-      int x = 0;
-      int y = 0;
-      latLonToScreen(lat, lon, &x, &y);
+    int x = 0;
+    int y = 0;
+    latLonToScreen(lat, lon, &x, &y);
+    if (isSymbolOnScreen(x, y)) {
       items[draw_count].index = i;
       items[draw_count].x = x;
       items[draw_count].y = y;
@@ -592,6 +589,9 @@ void drawAircraft() {
     drawHeadingTriangle(x, y, planes[i].nose_deg, radar::kColorAircraft);
   }
   for (size_t d = 0; d < draw_count; ++d) {
+    if (!showsTag(items[d].x, items[d].y)) {
+      continue;
+    }
     const size_t i = items[d].index;
     drawAircraftTag(items[d].x, items[d].y, planes[i]);
   }

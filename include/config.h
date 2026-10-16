@@ -61,8 +61,8 @@ constexpr float kAircraftExtrapolateMaxSec = 30.0f;
 constexpr unsigned long kAircraftBlendMs = kAdsbFetchIntervalMs;
 /** Gaps larger than this snap instead of gliding. */
 constexpr float kAircraftBlendMaxKm = 5.0f;
-/** Legacy scale unused — fetch uses radar::fetchRadiusKm() to screen edge. */
-constexpr float kAdsbFetchRadiusScale = 1.0f;
+/** Fetch this far beyond the screen edge; the extra band shows as rim dots. */
+constexpr float kAdsbFetchRadiusScale = 1.5f;
 /** false = hide aircraft with alt_baro "ground"; true = show them too. */
 constexpr bool kAdsbShowGroundAircraft = false;
 /** Draw terrain: water fill + coast/lake/river/border outlines (Sweden only). */

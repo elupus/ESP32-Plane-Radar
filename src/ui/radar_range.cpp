@@ -2,6 +2,8 @@
 
 #include "ui/radar_theme.h"
 
+#include "config.h"
+
 #include <Preferences.h>
 #include <cmath>
 #include <cstdio>
@@ -93,12 +95,14 @@ const RangePreset& rangeCurrent() { return kRangePresets[s_range_index]; }
 
 uint8_t rangeIndex() { return s_range_index; }
 
-float fetchRadiusKm() {
+float screenRadiusKm() {
   const float outer_km = rangeCurrent().outer_km;
   const float screen_r_px =
       static_cast<float>(kCenterX - kBeyondRingScreenMarginPx);
   return outer_km * (screen_r_px / static_cast<float>(kGridOuterRadius));
 }
+
+float fetchRadiusKm() { return screenRadiusKm() * config::kAdsbFetchRadiusScale; }
 
 bool useMiles() { return s_use_miles; }
 
