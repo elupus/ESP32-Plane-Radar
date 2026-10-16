@@ -40,9 +40,10 @@ constexpr int kDisplayWidth = 240;
 constexpr int kDisplayHeight = 240;
 
 constexpr uint32_t kDisplaySpiWriteHz = 40000000;
-// GC9A01 modules often need invert + BGR for correct black/green output
+// GC9A01 modules often need invert for correct black output. rgb_order=true
+// swaps red/blue on this panel, so keep it false and colours render as defined.
 constexpr bool kDisplayInvert = true;
-constexpr bool kDisplayRgbOrder = true;
+constexpr bool kDisplayRgbOrder = false;
 
 // --- Radar center defaults (overridden via WiFi setup portal) ---
 constexpr double kDefaultRadarLat = 52.3676;
