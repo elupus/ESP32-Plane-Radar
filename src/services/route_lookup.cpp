@@ -5,6 +5,8 @@
 
 #include <ArduinoJson.h>
 
+#include <cctype>
+#include <cstdio>
 #include <cstring>
 
 #include "services/adsb_client.h"
@@ -24,8 +26,8 @@ constexpr unsigned long kLookupIntervalMs = 4000;
 
 struct CacheEntry {
   char callsign[9] = {0};
-  char route[16] = {0};  // "XXX>YYY" (IATA) or "XXXX>YYYY" (ICAO fallback)
-  bool known = false;    // true once this callsign has a definitive answer
+  Route route = {};    // route.text empty = no usable route
+  bool known = false;  // true once this callsign has a definitive answer
   bool in_use = false;
   unsigned long last_seen_ms = 0;
 };
@@ -128,22 +130,34 @@ CacheEntry* claimSlotFor(const char* callsign) {
   }
   victim->in_use = true;
   victim->known = false;
-  victim->route[0] = '\0';
+  victim->route = Route{};
   strncpy(victim->callsign, callsign, sizeof(victim->callsign) - 1);
   victim->callsign[sizeof(victim->callsign) - 1] = '\0';
   return victim;
 }
 
-void appendAirportCode(char* out, size_t out_len, JsonVariantConst airport) {
-  const char* code = nullptr;
+void copyString(char* out, size_t out_len, const char* s) {
+  strncpy(out, s, out_len - 1);
+  out[out_len - 1] = '\0';
+}
+
+void readAirport(JsonVariantConst airport, char* code, size_t code_len, char* cc,
+                 size_t cc_len) {
+  code[0] = '\0';
+  cc[0] = '\0';
   if (airport["iata_code"].is<const char*>() &&
       airport["iata_code"].as<const char*>()[0] != '\0') {
-    code = airport["iata_code"].as<const char*>();
+    copyString(code, code_len, airport["iata_code"].as<const char*>());
   } else if (airport["icao_code"].is<const char*>()) {
-    code = airport["icao_code"].as<const char*>();
+    copyString(code, code_len, airport["icao_code"].as<const char*>());
   }
-  if (code != nullptr) {
-    strncat(out, code, out_len - strlen(out) - 1);
+  if (airport["country_iso_name"].is<const char*>()) {
+    const char* iso = airport["country_iso_name"].as<const char*>();
+    if (strlen(iso) == 2) {
+      cc[0] = static_cast<char>(toupper(static_cast<unsigned char>(iso[0])));
+      cc[1] = static_cast<char>(toupper(static_cast<unsigned char>(iso[1])));
+      cc[2] = '\0';
+    }
   }
 }
 
@@ -208,17 +222,17 @@ void performLookup(CacheEntry* entry) {
     return;
   }
 
-  char route[sizeof(CacheEntry::route)] = {0};
-  appendAirportCode(route, sizeof(route), flightroute["origin"]);
-  strncat(route, ">", sizeof(route) - strlen(route) - 1);
-  appendAirportCode(route, sizeof(route), flightroute["destination"]);
-  if (strcmp(route, ">") == 0) {
-    route[0] = '\0';  // neither side resolved to a usable code
+  Route route = {};
+  readAirport(flightroute["origin"], route.origin, sizeof(route.origin),
+              route.origin_cc, sizeof(route.origin_cc));
+  readAirport(flightroute["destination"], route.dest, sizeof(route.dest),
+              route.dest_cc, sizeof(route.dest_cc));
+  if (route.origin[0] != '\0' || route.dest[0] != '\0') {
+    snprintf(route.text, sizeof(route.text), "%s>%s", route.origin, route.dest);
   }
 
   services::data::lock();
-  strncpy(entry->route, route, sizeof(entry->route) - 1);
-  entry->route[sizeof(entry->route) - 1] = '\0';
+  entry->route = route;
   services::data::unlock();
 }
 
@@ -251,15 +265,15 @@ void poll() {
   }
 }
 
-const char* routeFor(const char* callsign) {
+const Route* routeFor(const char* callsign) {
   if (callsign == nullptr || callsign[0] == '\0') {
     return nullptr;
   }
   CacheEntry* entry = findEntry(callsign);
-  if (entry == nullptr || !entry->known || entry->route[0] == '\0') {
+  if (entry == nullptr || !entry->known || entry->route.text[0] == '\0') {
     return nullptr;
   }
-  return entry->route;
+  return &entry->route;
 }
 
 }  // namespace services::route

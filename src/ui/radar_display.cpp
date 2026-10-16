@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 
 #include "config.h"
+#include "data/flags.h"
 #include "hardware/display.h"
 #include "hardware/display_font.h"
 #include "services/adsb_client.h"
@@ -399,8 +401,104 @@ void applyTagStyle() {
   }
 }
 
+/** RGB332 flag bitmap for an upper-case ISO alpha-2 code, or nullptr. */
+const uint8_t* flagPixels(const char* cc) {
+  if (cc == nullptr || cc[0] == '\0') {
+    return nullptr;
+  }
+  size_t lo = 0;
+  size_t hi = data::flags::kFlagCount;
+  while (lo < hi) {
+    const size_t mid = (lo + hi) / 2;
+    const int cmp = strcmp(data::flags::kFlags[mid].cc, cc);
+    if (cmp == 0) {
+      return data::flags::kFlags[mid].px;
+    }
+    if (cmp < 0) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  return nullptr;
+}
+
+constexpr int kRouteArrowW = 3;
+constexpr int kRouteArrowGapPx = 2;
+
+/** One end of a route: its country flag, or its airport code as fallback. */
+struct RouteSide {
+  const char* code;
+  const uint8_t* flag;
+};
+
+int routeSideWidth(const RouteSide& side) {
+  if (side.flag != nullptr) {
+    return data::flags::kFlagW;
+  }
+  return side.code[0] != '\0' ? s_draw->textWidth(side.code) : 0;
+}
+
+/**
+ * Route line as "[flag] > [flag]" when the portal option is on; plain text
+ * when it's off or neither side has a flag.
+ */
+bool routeUsesFlags(const services::route::Route& route, RouteSide* origin,
+                    RouteSide* dest) {
+  if (!ui::radar::routeFlags()) {
+    return false;
+  }
+  *origin = {route.origin, flagPixels(route.origin_cc)};
+  *dest = {route.dest, flagPixels(route.dest_cc)};
+  return origin->flag != nullptr || dest->flag != nullptr;
+}
+
+int routeLineWidth(const services::route::Route& route) {
+  RouteSide origin;
+  RouteSide dest;
+  if (!routeUsesFlags(route, &origin, &dest)) {
+    return s_draw->textWidth(route.text);
+  }
+  return routeSideWidth(origin) + kRouteArrowGapPx * 2 + kRouteArrowW +
+         routeSideWidth(dest);
+}
+
+void drawRouteSide(const RouteSide& side, int x, int ly, int line_h) {
+  if (side.flag != nullptr) {
+    s_draw->pushImage(x, ly + (line_h - data::flags::kFlagH) / 2,
+                      data::flags::kFlagW, data::flags::kFlagH,
+                      reinterpret_cast<const lgfx::rgb332_t*>(side.flag));
+  } else if (side.code[0] != '\0') {
+    s_draw->drawString(side.code, x, ly);
+  }
+}
+
+/** Draws the route line; anchor_x is its left edge if align_left, else its right. */
+void drawRouteLine(const services::route::Route& route, int anchor_x, int ly,
+                   int line_h, bool align_left) {
+  s_draw->setTextColor(radar::kColorTagRoute, radar::kColorBackground);
+  RouteSide origin;
+  RouteSide dest;
+  if (!routeUsesFlags(route, &origin, &dest)) {
+    s_draw->drawString(route.text, anchor_x, ly);
+    return;
+  }
+
+  const textdatum_t prev_datum = s_draw->getTextDatum();
+  s_draw->setTextDatum(textdatum_t::top_left);
+  int x = align_left ? anchor_x : anchor_x - routeLineWidth(route);
+  drawRouteSide(origin, x, ly, line_h);
+  x += routeSideWidth(origin) + kRouteArrowGapPx;
+  const int cy = ly + line_h / 2;
+  s_draw->fillTriangle(x, cy - 2, x, cy + 2, x + kRouteArrowW - 1, cy,
+                       radar::kColorTagRoute);
+  x += kRouteArrowW + kRouteArrowGapPx;
+  drawRouteSide(dest, x, ly, line_h);
+  s_draw->setTextDatum(prev_datum);
+}
+
 int measureTagBlockWidth(const services::adsb::Aircraft& plane,
-                         const char* route) {
+                         const services::route::Route* route) {
   applyTagStyle();
   int max_w = 0;
   if (plane.callsign[0] != '\0') {
@@ -422,7 +520,7 @@ int measureTagBlockWidth(const services::adsb::Aircraft& plane,
     }
   }
   if (route != nullptr) {
-    const int w = s_draw->textWidth(route);
+    const int w = routeLineWidth(*route);
     if (w > max_w) {
       max_w = w;
     }
@@ -434,14 +532,14 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   initTagLabelMetrics();
   applyTagStyle();
 
-  const char* route = services::route::routeFor(plane.callsign);
+  const services::route::Route* route = services::route::routeFor(plane.callsign);
   const bool route_replaces_callsign =
       route != nullptr && ui::radar::routeReplacesCallsign();
-  const char* route_line = route_replaces_callsign ? nullptr : route;
+  const bool route_line = route != nullptr && !route_replaces_callsign;
 
   const int line_h = s_draw->fontHeight();
   const int block_w = measureTagBlockWidth(plane, route);
-  const int line_count = route_line != nullptr ? 4 : 3;
+  const int line_count = route_line ? 4 : 3;
   const int block_h = line_h * line_count;
   int ly = y - block_h / 2;
 
@@ -462,8 +560,7 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   ly = std::max(1, std::min(ly, radar::kSize - block_h - 1));
 
   if (route_replaces_callsign) {
-    s_draw->setTextColor(radar::kColorTagRoute, radar::kColorBackground);
-    s_draw->drawString(route, anchor_x, ly);
+    drawRouteLine(*route, anchor_x, ly, line_h, tag_on_right);
   } else if (plane.callsign[0] != '\0') {
     s_draw->setTextColor(radar::kColorLabel, radar::kColorBackground);
     s_draw->drawString(plane.callsign, anchor_x, ly);
@@ -482,9 +579,8 @@ void drawAircraftTag(int x, int y, const services::adsb::Aircraft& plane) {
   }
   ly += line_h;
 
-  if (route_line != nullptr) {
-    s_draw->setTextColor(radar::kColorTagRoute, radar::kColorBackground);
-    s_draw->drawString(route_line, anchor_x, ly);
+  if (route_line) {
+    drawRouteLine(*route, anchor_x, ly, line_h, tag_on_right);
   }
 }
 

@@ -18,6 +18,7 @@ constexpr char kPrefsRangeKey[] = "rangeIdx";
 constexpr char kPrefsMilesKey[] = "useMiles";
 constexpr char kPrefsRunwaysKey[] = "showRwys";
 constexpr char kPrefsRouteReplaceKey[] = "rteReplace";
+constexpr char kPrefsRouteFlagsKey[] = "rteFlags";
 constexpr uint8_t kDefaultRangeIndex = 1;  // 10 km ring
 constexpr float kKmPerMile = 1.609344f;
 
@@ -26,6 +27,7 @@ uint8_t s_range_index = kDefaultRangeIndex;
 bool s_use_miles = false;
 bool s_show_runways = true;
 bool s_route_replaces_callsign = true;
+bool s_route_flags = true;
 
 void saveRangeIndex() {
   if (!s_prefs.begin(kPrefsNamespace, false)) {
@@ -59,6 +61,14 @@ void saveRouteReplace() {
   s_prefs.end();
 }
 
+void saveRouteFlags() {
+  if (!s_prefs.begin(kPrefsNamespace, false)) {
+    return;
+  }
+  s_prefs.putBool(kPrefsRouteFlagsKey, s_route_flags);
+  s_prefs.end();
+}
+
 bool portalCheckboxChecked(const char* value) {
   if (value == nullptr || value[0] == '\0') {
     return false;
@@ -83,6 +93,7 @@ void rangeInit() {
   s_use_miles = s_prefs.getBool(kPrefsMilesKey, false);
   s_show_runways = s_prefs.getBool(kPrefsRunwaysKey, true);
   s_route_replaces_callsign = s_prefs.getBool(kPrefsRouteReplaceKey, true);
+  s_route_flags = s_prefs.getBool(kPrefsRouteFlagsKey, true);
   s_prefs.end();
 }
 
@@ -110,6 +121,8 @@ bool showRunways() { return s_show_runways; }
 
 bool routeReplacesCallsign() { return s_route_replaces_callsign; }
 
+bool routeFlags() { return s_route_flags; }
+
 void saveMilesFromPortal(const char* checkbox_value) {
   s_use_miles = portalCheckboxChecked(checkbox_value);
   saveUseMiles();
@@ -127,6 +140,12 @@ void saveRouteReplacesCallsignFromPortal(const char* checkbox_value) {
   saveRouteReplace();
   Serial.printf("Route replaces callsign: %s\n",
                 s_route_replaces_callsign ? "on" : "off");
+}
+
+void saveRouteFlagsFromPortal(const char* checkbox_value) {
+  s_route_flags = portalCheckboxChecked(checkbox_value);
+  saveRouteFlags();
+  Serial.printf("Route as flags: %s\n", s_route_flags ? "on" : "off");
 }
 
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles) {
@@ -147,10 +166,12 @@ void unitsReset() {
   s_use_miles = false;
   s_show_runways = true;
   s_route_replaces_callsign = true;
+  s_route_flags = true;
   if (s_prefs.begin(kPrefsNamespace, false)) {
     s_prefs.remove(kPrefsMilesKey);
     s_prefs.remove(kPrefsRunwaysKey);
     s_prefs.remove(kPrefsRouteReplaceKey);
+    s_prefs.remove(kPrefsRouteFlagsKey);
     s_prefs.end();
   }
 }

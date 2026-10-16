@@ -55,10 +55,14 @@ bool showRunways();
 /** If true and a route is known, the destination replaces the callsign line instead of
  *  appending a separate line. */
 bool routeReplacesCallsign();
+/** If true, routes are drawn as origin/destination country flags instead of
+ *  airport codes. */
+bool routeFlags();
 /** WiFi portal checkbox: "T" = miles, otherwise km. */
 void saveMilesFromPortal(const char* checkbox_value);
 void saveRunwaysFromPortal(const char* checkbox_value);
 void saveRouteReplacesCallsignFromPortal(const char* checkbox_value);
+void saveRouteFlagsFromPortal(const char* checkbox_value);
 void formatRing3Label(char* buf, size_t len, float ring3_km, bool use_miles);
 void formatCurrentRing3Label(char* buf, size_t len);
 /** Reset distance units to km (e.g. with WiFi credential wipe). */
