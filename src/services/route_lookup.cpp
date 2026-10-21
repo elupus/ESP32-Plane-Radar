@@ -5,7 +5,9 @@
 
 #include <ArduinoJson.h>
 
+#include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -23,6 +25,17 @@ constexpr unsigned long kRequestTimeoutMs = 8000;
 // network op the background task can do at a time, and so a bad lookup
 // can't compound with an in-flight aircraft fetch.
 constexpr unsigned long kLookupIntervalMs = 4000;
+
+// Route sanity check. adsbdb maps callsigns to routes from crowd-sourced data
+// that is often stale (callsigns get reused), so a plane over Sweden can come
+// back as e.g. a UK domestic flight. Reject a route when the plane is too far
+// off the great circle between its airports. Real tracks bend away from the
+// great circle on long flights (airspace closures, oceanic tracks), so the
+// allowed offset grows with route length.
+constexpr double kEarthRadiusKm = 6371.0;
+constexpr double kRouteMinOffsetKm = 150.0;
+constexpr double kRouteOffsetFraction = 0.3;
+constexpr double kRouteEndSlackKm = 150.0;
 
 struct CacheEntry {
   char callsign[9] = {0};
@@ -161,7 +174,64 @@ void readAirport(JsonVariantConst airport, char* code, size_t code_len, char* cc
   }
 }
 
-void performLookup(CacheEntry* entry) {
+bool readLatLon(JsonVariantConst airport, double* lat, double* lon) {
+  if (!airport["latitude"].is<double>() || !airport["longitude"].is<double>()) {
+    return false;
+  }
+  *lat = airport["latitude"].as<double>();
+  *lon = airport["longitude"].as<double>();
+  return true;
+}
+
+double toRad(double deg) { return deg * 0.017453292519943295; }
+
+double angularDistance(double lat1, double lon1, double lat2, double lon2) {
+  const double dlat = lat2 - lat1;
+  const double dlon = lon2 - lon1;
+  const double a = sin(dlat / 2) * sin(dlat / 2) +
+                   cos(lat1) * cos(lat2) * sin(dlon / 2) * sin(dlon / 2);
+  return 2.0 * atan2(sqrt(a), sqrt(1.0 - a));
+}
+
+double initialBearing(double lat1, double lon1, double lat2, double lon2) {
+  const double dlon = lon2 - lon1;
+  return atan2(sin(dlon) * cos(lat2),
+               cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(dlon));
+}
+
+/**
+ * True when the plane at (plat, plon) is plausibly flying origin -> dest:
+ * close enough to the great circle between them, and not far beyond either
+ * end. All inputs in degrees. *off_km reports the cross-track distance.
+ */
+bool planeFitsRoute(double olat, double olon, double dlat, double dlon,
+                    double plat, double plon, double* off_km) {
+  olat = toRad(olat);
+  olon = toRad(olon);
+  dlat = toRad(dlat);
+  dlon = toRad(dlon);
+  plat = toRad(plat);
+  plon = toRad(plon);
+
+  const double route_km = angularDistance(olat, olon, dlat, dlon) * kEarthRadiusKm;
+  const double d13 = angularDistance(olat, olon, plat, plon);
+  const double dtheta =
+      initialBearing(olat, olon, plat, plon) - initialBearing(olat, olon, dlat, dlon);
+  const double xt = asin(sin(d13) * sin(dtheta));
+  double along_km = acos(std::max(-1.0, std::min(1.0, cos(d13) / cos(xt)))) *
+                    kEarthRadiusKm;
+  if (cos(dtheta) < 0.0) {
+    along_km = -along_km;  // plane is behind the origin
+  }
+  *off_km = fabs(xt) * kEarthRadiusKm;
+
+  const double max_off_km =
+      std::max(kRouteMinOffsetKm, kRouteOffsetFraction * route_km);
+  return *off_km <= max_off_km && along_km >= -kRouteEndSlackKm &&
+         along_km <= route_km + kRouteEndSlackKm;
+}
+
+void performLookup(CacheEntry* entry, float plane_lat, float plane_lon) {
   WiFiClientSecure client;
   client.setInsecure();
 
@@ -227,6 +297,19 @@ void performLookup(CacheEntry* entry) {
               route.origin_cc, sizeof(route.origin_cc));
   readAirport(flightroute["destination"], route.dest, sizeof(route.dest),
               route.dest_cc, sizeof(route.dest_cc));
+
+  double olat = 0.0;
+  double olon = 0.0;
+  double dlat = 0.0;
+  double dlon = 0.0;
+  double off_km = 0.0;
+  if (readLatLon(flightroute["origin"], &olat, &olon) &&
+      readLatLon(flightroute["destination"], &dlat, &dlon) &&
+      !planeFitsRoute(olat, olon, dlat, dlon, plane_lat, plane_lon, &off_km)) {
+    Serial.printf("route: %s %s>%s rejected (plane %.0f km off route)\n",
+                  entry->callsign, route.origin, route.dest, off_km);
+    return;  // known, but no usable route
+  }
   if (route.origin[0] != '\0' || route.dest[0] != '\0') {
     snprintf(route.text, sizeof(route.text), "%s>%s", route.origin, route.dest);
   }
@@ -260,7 +343,7 @@ void poll() {
     entry->last_seen_ms = now;
     services::data::unlock();
     s_last_lookup_ms = now;
-    performLookup(entry);
+    performLookup(entry, aircraft[i].lat, aircraft[i].lon);
     return;  // one lookup per call, regardless of outcome
   }
 }
